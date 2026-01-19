@@ -1,6 +1,20 @@
 [package]
-name = "fhe_store"
+name = "fhe_biometric_db"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
+# The Star: Zama's Pure Rust FHE Library
+# 'integer' feature enables 32-bit encrypted math
+tfhe = { version = "0.7.2", features = ["integer", "x86_64-unix", "boolean"] }
+
+# For random number generation (needed for keys)
+rand = "0.8"
+
+# For benchmarking your speed later
+criterion = "0.5"
+
+[profile.release]
+opt-level = 3      # Maximize speed
+lto = true         # Link Time Optimization
+codegen-units = 1  # Slower compile, faster code
