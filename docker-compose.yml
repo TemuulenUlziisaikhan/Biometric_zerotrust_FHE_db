@@ -1,0 +1,27 @@
+
+services:
+  # --- NODE 1: THE CLOUD SERVER ---
+  fhe-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    ports:
+      - "8080:8080"
+    networks:
+      - fhe_network
+    command: ["./fhe_server"]
+
+  # --- NODE 2: THE EDGE CLIENT ---
+  fhe-client:
+    build:
+      context: .
+      dockerfile: Dockerfile.client
+    ports:
+      - "5000:5000" # Expose Flask to your laptop
+    networks:
+      - fhe_network
+    command: ["python3", "app.py"] # Launch the daemon automatically
+
+networks:
+  fhe_network:
+    driver: bridge

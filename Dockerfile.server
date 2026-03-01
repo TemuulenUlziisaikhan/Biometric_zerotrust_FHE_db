@@ -1,0 +1,16 @@
+# Stage 1: The Builder
+FROM openfhe-base-image AS builder
+WORKDIR /app
+# Tell Docker to copy the subdirectory
+COPY fhe_store ./fhe_store
+# Step inside it to build
+WORKDIR /app/fhe_store
+RUN cargo build --release --bin fhe_server
+
+# Stage 2: The Final Server Image
+FROM openfhe-base-image
+WORKDIR /app
+# Pull the binary out of the subfolder's target directory
+COPY --from=builder /app/fhe_store/target/release/fhe_server .
+
+RUN ldconfig /usr/local/lib /usr/lib

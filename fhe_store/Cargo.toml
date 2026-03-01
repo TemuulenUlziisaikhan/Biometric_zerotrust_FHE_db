@@ -1,20 +1,25 @@
 [package]
-name = "fhe_biometric_db"
+name = "fhe_store"
 version = "0.1.0"
 edition = "2021"
 
+# 1. We tell Cargo to build a Python-compatible shared library (.so)
+[lib]
+name = "fhe_client"
+crate-type = ["cdylib"]
+
+# 2. We explicitly tell Cargo where our web server is
+[[bin]]
+name = "fhe_server"
+path = "src/main.rs"
+
 [dependencies]
-# The Star: Zama's Pure Rust FHE Library
-# 'integer' feature enables 32-bit encrypted math
-tfhe = { version = "0.7.2", features = ["integer", "x86_64-unix", "boolean"] }
+# Your existing dependencies...
+actix-web = "4.4"
+openfhe = { git = "https://github.com/fairmath/openfhe-rs.git" }
+serde = { version = "1.0", features = ["derive"] }
 
-# For random number generation (needed for keys)
-rand = "0.8"
+# NEW: The Rust-to-Python bridge
+pyo3 = { version = "0.20", features = ["extension-module"] }
 
-# For benchmarking your speed later
-criterion = "0.5"
-
-[profile.release]
-opt-level = 3      # Maximize speed
-lto = true         # Link Time Optimization
-codegen-units = 1  # Slower compile, faster code
+base64 = "0.21.5"

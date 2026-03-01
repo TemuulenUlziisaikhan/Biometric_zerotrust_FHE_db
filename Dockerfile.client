@@ -1,0 +1,21 @@
+# Stage 1: The Builder
+FROM openfhe-base-image AS builder
+WORKDIR /app
+COPY fhe_store ./fhe_store
+WORKDIR /app/fhe_store
+RUN cargo build --release --lib
+
+# Stage 2: The Final Client Image
+FROM openfhe-base-image
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y python3 python3-pip python3-requests python3-flask
+# Pull the compiled PyO3 library out and rename it
+COPY --from=builder /app/fhe_store/target/release/libfhe_client.so ./fhe_client.so
+# Copy your Python script over too
+COPY client/ ./
+
+RUN ldconfig /usr/local/lib /usr/lib
+
+# Keep the container running in the background so we can execute scripts inside it
+CMD ["tail", "-f", "/dev/null"]
