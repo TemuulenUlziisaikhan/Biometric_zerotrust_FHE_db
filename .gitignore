@@ -98,6 +98,17 @@ celerybeat-schedule
 # Environments / dotenv
 .env
 .env.*
+*.env
+server/.env
+client/.env
+
+# Local credentials / tokens
+.kaggle/
+kaggle.json
+**/kaggle.json
+*.secret
+*.secrets
+*.token
 
 # IDEs and editors
 .vscode/
@@ -146,3 +157,22 @@ build/
 
 # Local IDE run artifacts
 .venv/
+
+# Local runtime/test artifacts
+scripts/.tmp/
+server/biometric.rocks/
+client/.shared_context/
+
+# RocksDB and local state
+*.rocks/
+*.rocksdb/
+
+# Private models / datasets / outputs
+models/
+data/
+datasets/
+benchmark_results/
+
+*.npy
+
+plan.md

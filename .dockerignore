@@ -1,0 +1,12 @@
+.git
+.gitignore
+venv
+__pycache__
+**/__pycache__
+*.pyc
+*.pyo
+*.pyd
+benchmark_results
+models
+server/biometric.rocks
+client/.shared_context

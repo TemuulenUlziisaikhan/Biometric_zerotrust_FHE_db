@@ -1,0 +1,10 @@
+[
+  {
+    "label": "Aaron_Eckhart",
+    "image_path": "/path/to/lfw-funneled/Aaron_Eckhart/Aaron_Eckhart_0001.jpg"
+  },
+  {
+    "label": "Abel_Pacheco",
+    "image_path": "/path/to/lfw-funneled/Abel_Pacheco/Abel_Pacheco_0001.jpg"
+  }
+]

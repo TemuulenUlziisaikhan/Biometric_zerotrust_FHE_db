@@ -1,0 +1,37 @@
+services:
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    image: fhe-bio-server:latest
+    environment:
+      LSH_BITS: "9"
+    ports:
+      - "8000:8000"
+    volumes:
+      - server_db:/app/server/biometric.rocks
+    restart: unless-stopped
+
+  web-client:
+    build:
+      context: .
+      dockerfile: Dockerfile.client
+    image: fhe-bio-web-client:latest
+    depends_on:
+      - server
+    environment:
+      SERVER_URL: http://server:8000
+      MODEL_PATH: /models/arcface.onnx
+      LFW_ROOT: /models/lfw-deepfunneled/lfw-deepfunneled
+      CLIENT_THRESHOLD: "800"
+      LSH_BITS: "9"
+    ports:
+      - "8500:8500"
+    volumes:
+      - client_context:/app/client/.shared_context
+      - ./models:/models:ro
+    restart: unless-stopped
+
+volumes:
+  server_db:
+  client_context:
