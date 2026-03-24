@@ -119,24 +119,29 @@ class Database:
                 rows.append((key, record))
         return rows
     
-    def list_numbered_records(self, page: int = 1, page_size: int = 100) -> tuple[list[tuple[str, dict]], int, int, int]:
+    def list_numbered_records(self, page: int = 1, page_size: int = 100) -> tuple[list[tuple[str, dict]], int, int, int, int]:
         keys = self.all_chunk_keys()
+        print(len(keys), "total chunk records found in database")
         total_chunks = len(keys)
         safe_page_size = max(1, int(page_size))
         total_pages = max(1, (total_chunks + safe_page_size - 1) // safe_page_size)
         safe_page = max(1, min(int(page), total_pages))
         start = (safe_page - 1) * safe_page_size
         end = start + safe_page_size
-        keys = keys[start:end]
+        keys_slice = keys[start:end]
+        
         rows: list[tuple[str, dict]] = []
-        for key in keys:
+        total_labels = 0
+        for key in keys_slice:
             record = self.read_chunk_record(key)
             if record is not None:
                 record = dict(record)
+                labels = record.get("uuid_map", [])
+                total_labels += len(labels)
                 record.pop("face_ciphertexts", None)
                 record.pop("packed_ciphertext", None)
                 rows.append((key, record))
-        return rows, total_pages, total_chunks, safe_page
+        return rows, total_pages, total_chunks, safe_page, total_labels
 
     def clear_all_chunk_records(self) -> int:
         keys = self.all_chunk_keys()

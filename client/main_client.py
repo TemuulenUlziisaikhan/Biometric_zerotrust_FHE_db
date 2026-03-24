@@ -60,18 +60,31 @@ class BiometricClient:
 
         if response.status_code >= 400:
             try:
-                detail = response.json().get("detail", {})
+                payload_in = response.json()
             except Exception:
-                detail = {}
+                payload_in = {}
+
+            request_id_header = response.headers.get("X-Request-ID", "")
+            detail = payload_in.get("detail", {}) if isinstance(payload_in, dict) else {}
             if isinstance(detail, dict):
                 code = detail.get("code", "SERVER_ERROR")
                 message = detail.get("message", response.text)
+                request_id = str(detail.get("request_id", "")).strip() or request_id_header
             else:
                 code = "SERVER_ERROR"
                 message = str(detail)
-            raise ServerError(f"{code}: {message}")
+                request_id = request_id_header
+
+            request_id_suffix = f" (request_id={request_id})" if request_id else ""
+            raise ServerError(f"{code}: {message}{request_id_suffix}")
 
         payload_out = response.json()
+        if isinstance(payload_out, dict):
+            nested_data = payload_out.get("data")
+            if isinstance(nested_data, dict):
+                merged = dict(payload_out)
+                merged.update(nested_data)
+                payload_out = merged
         api_version = payload_out.get("api_version")
         if api_version is not None and api_version != API_VERSION:
             raise ServerError(f"API_VERSION_MISMATCH: expected {API_VERSION}, got {api_version}")

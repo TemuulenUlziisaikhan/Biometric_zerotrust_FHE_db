@@ -80,15 +80,10 @@ class DBLabelsResponse(VersionedResponse):
 
 
 class DBRecordRow(BaseModel):
+    """Database record row for admin viewing. Does NOT expose encrypted data or internal structures."""
     chunk_key: str
     bucket_id: str
-    chunk_index: int
-    current_face_count: int
     labels: list[str]
-    packed_ciphertext_len: int
-    face_ciphertexts_count: int
-    context_fingerprint: str | None
-    raw_record: dict
 
 
 class DBRecordsResponse(VersionedResponse):

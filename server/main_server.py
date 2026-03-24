@@ -43,10 +43,52 @@ from server.fhe_server import (
 )
 
 logger = logging.getLogger("server.audit")
+logger_debug = logging.getLogger("server.debug")
 
 
-def _http_error(status_code: int, code: str, message: str) -> HTTPException:
-    return HTTPException(status_code=status_code, detail={"code": code, "message": message})
+def _error_detail(request: Request, code: str, message: str, errors: list[dict] | None = None) -> dict:
+    detail = {
+        "code": code,
+        "message": message,
+        "request_id": getattr(request.state, "request_id", "unknown"),
+    }
+    if errors is not None:
+        detail["errors"] = errors
+    return detail
+
+
+def _http_error(request: Request, status_code: int, code: str, message: str) -> HTTPException:
+    # Never expose raw exception details to clients; use generic messages
+    return HTTPException(status_code=status_code, detail=_error_detail(request, code, message))
+
+
+def _sanitize_exception(exc: Exception) -> tuple[str, str]:
+    """
+    Convert raw exception to generic error code + safe message for client.
+    Full exception is logged server-side at debug level for troubleshooting.
+    
+    Returns: (error_code, safe_message)
+    """
+    exc_type = type(exc).__name__
+    logger_debug.debug(f"Exception type={exc_type} message={str(exc)}", exc_info=True)
+    
+    # Map exception types to generic codes; never expose details to client
+    if "Crypto" in exc_type or "tenseal" in str(exc).lower():
+        return "INVALID_CRYPTO_PAYLOAD", "Invalid cryptographic payload"
+    elif "Validation" in exc_type:
+        return "INVALID_PAYLOAD", "Invalid request payload"
+    else:
+        return "INTERNAL_ERROR", "An error occurred processing your request"
+
+
+def _storage_error(request: Request, action: str, exc: Exception) -> HTTPException:
+    logger_debug.error("Storage inconsistency in %s: %s", action, str(exc), exc_info=True)
+    return _http_error(request, 500, "STORAGE_ERROR", "Failed to access storage")
+
+
+def _crypto_payload_error(request: Request, exc: Exception) -> HTTPException:
+    code, msg = _sanitize_exception(exc)
+    return _http_error(request, 400, code, msg)
 
 
 app = FastAPI(title="Sub-Linear FHE Biometric Server")
@@ -85,16 +127,39 @@ async def audit_middleware(request: Request, call_next):
     return response
 
 @app.exception_handler(RequestValidationError)
-def request_validation_exception_handler(_request: Request, exc: RequestValidationError) -> JSONResponse:
+def request_validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
     return JSONResponse(
         status_code=422,
         content={
-            "detail": {
-                "code": "VALIDATION_ERROR",
-                "message": "Invalid request payload",
-                "errors": exc.errors(),
-            }
+            "detail": _error_detail(request, "VALIDATION_ERROR", "Invalid request payload", errors=exc.errors())
         },
+    )
+
+
+@app.exception_handler(HTTPException)
+def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
+    detail = exc.detail if isinstance(exc.detail, dict) else {"code": "HTTP_ERROR", "message": str(exc.detail)}
+    code = str(detail.get("code", "HTTP_ERROR"))
+    message = str(detail.get("message", "Request failed"))
+    errors = detail.get("errors") if isinstance(detail.get("errors"), list) else None
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": _error_detail(request, code, message, errors=errors)},
+    )
+
+
+@app.exception_handler(Exception)
+def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    logger.exception(
+        "unhandled_exception request_id=%s method=%s path=%s",
+        getattr(request.state, "request_id", "unknown"),
+        request.method,
+        request.url.path,
+    )
+    code, message = _sanitize_exception(exc)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": _error_detail(request, code, message)},
     )
 
 
@@ -109,7 +174,7 @@ def db_labels(request: Request) -> DBLabelsResponse:
     try:
         records = db.list_all_chunk_records()
     except DataConsistencyError as exc:
-        raise _http_error(500, "STORAGE_INCONSISTENT", str(exc))
+        raise _storage_error(request, "db_labels", exc)
 
     rows: list[DBLabelsChunkRow] = []
     total_labels = 0
@@ -147,31 +212,20 @@ def db_records(
     label: str = Query(default="", max_length=128),
 ) -> DBRecordsResponse:
     try:
-        records, total_pages, total_chunks, effective_page = db.list_numbered_records(page=page, page_size=page_size)
+        records, total_pages, total_chunks, effective_page, total_labels = db.list_numbered_records(page=page, page_size=page_size)
     except DataConsistencyError as exc:
-        raise _http_error(500, "STORAGE_INCONSISTENT", str(exc))
+        raise _storage_error(request, "db_records", exc)
 
-    label_query = ""
+    label_query = label.strip()
 
     rows: list[DBRecordRow] = []
-    total_labels = 0
-    for _chunk_key, record in db.list_all_chunk_records():
-        labels = [str(item) for item in record.get("uuid_map", [])]
-        total_labels += len(labels)
-
     for chunk_key, record in records:
         labels = [str(item) for item in record.get("uuid_map", [])]
         rows.append(
             DBRecordRow(
                 chunk_key=chunk_key,
                 bucket_id=record["bucket_id"].split("_Chunk_")[0],
-                chunk_index=db.parse_chunk_index(chunk_key),
-                current_face_count=int(record["current_face_count"]),
                 labels=labels,
-                packed_ciphertext_len=0,
-                face_ciphertexts_count=0,
-                context_fingerprint=record.get("context_fingerprint"),
-                raw_record=record,
             )
         )
 
@@ -204,12 +258,12 @@ def admin_delete_label(request: Request, req: DeleteLabelRequest) -> DeleteLabel
         ctx_fingerprint = eval_context_fingerprint(req.eval_context_b64)
         context = deserialize_eval_context(req.eval_context_b64)
     except Exception as exc:
-        raise _http_error(400, "INVALID_CRYPTO_PAYLOAD", f"Invalid cryptographic payload: {exc}")
+        raise _crypto_payload_error(request, exc)
 
     try:
         records = db.list_all_chunk_records()
     except DataConsistencyError as exc:
-        raise _http_error(500, "STORAGE_INCONSISTENT", str(exc))
+        raise _storage_error(request, "delete-label", exc)
 
     deleted_count = 0
     affected_chunks = 0
@@ -281,7 +335,7 @@ def admin_delete_label(request: Request, req: DeleteLabelRequest) -> DeleteLabel
 @app.post("/admin/reset", response_model=ResetDBResponse)
 def admin_reset(request: Request, req: ResetDBRequest) -> ResetDBResponse:
     if req.confirm_text != "RESET_DB":
-        raise _http_error(400, "INVALID_CONFIRM_TEXT", "confirm_text must equal RESET_DB")
+        raise _http_error(request, 400, "INVALID_CONFIRM_TEXT", "confirm_text must equal RESET_DB")
 
     deleted_chunks = db.clear_all_chunk_records()
     logger.info(
@@ -319,7 +373,7 @@ def enroll(request: Request, req: EnrollRequest) -> EnrollResponse:
         context = deserialize_eval_context(req.eval_context_b64)
         incoming_ct = deserialize_ciphertext(context, req.sparse_ciphertext_b64)
     except Exception as exc:
-        raise _http_error(400, "INVALID_CRYPTO_PAYLOAD", f"Invalid cryptographic payload: {exc}")
+        raise _crypto_payload_error(request, exc)
 
     chunk_key = db.make_chunk_key(req.bucket_id, req.chunk_index)
     try:
@@ -327,12 +381,12 @@ def enroll(request: Request, req: EnrollRequest) -> EnrollResponse:
         if record is None:
             record = db.create_empty_chunk_record(req.bucket_id, req.chunk_index)
     except DataConsistencyError as exc:
-        raise _http_error(500, "STORAGE_INCONSISTENT", str(exc))
+        raise _storage_error(request, "enroll", exc)
 
     try:
         existing_fp = record.get("context_fingerprint")
         if existing_fp is not None and existing_fp != ctx_fingerprint:
-            raise _http_error(409, "CONTEXT_MISMATCH", "Evaluation context does not match existing chunk")
+            raise _http_error(request, 409, "CONTEXT_MISMATCH", "Evaluation context does not match existing chunk")
 
         if "face_ciphertexts" not in record:
             record["face_ciphertexts"] = [None] * int(record["current_face_count"])
@@ -348,7 +402,7 @@ def enroll(request: Request, req: EnrollRequest) -> EnrollResponse:
         record["face_ciphertexts"].append(req.sparse_ciphertext_b64)
         db.write_chunk_record(chunk_key, record)
     except ValueError as exc:
-        raise _http_error(409, "CHUNK_FULL", str(exc))
+        raise _http_error(request, 409, "CHUNK_FULL", str(exc))
 
     logger.info(
         "enroll request_id=%s bucket_id=%s chunk_index=%d face_count=%d",
@@ -372,6 +426,7 @@ def authenticate(request: Request, req: AuthenticateRequest) -> AuthenticateResp
     for bucket_id in req.bucket_ids:
         if len(bucket_id) != BUCKET_LEN or not bucket_id.startswith("Bucket_"):
             raise _http_error(
+                request,
                 400,
                 "INVALID_BUCKET_ID",
                 f"bucket_ids entries must match Bucket_[01]{{{BUCKET_BITS}}}",
@@ -379,6 +434,7 @@ def authenticate(request: Request, req: AuthenticateRequest) -> AuthenticateResp
         suffix = bucket_id.split("Bucket_", maxsplit=1)[-1]
         if len(suffix) != BUCKET_BITS or any(ch not in {"0", "1"} for ch in suffix):
             raise _http_error(
+                request,
                 400,
                 "INVALID_BUCKET_ID",
                 f"bucket_ids entries must match Bucket_[01]{{{BUCKET_BITS}}}",
@@ -389,18 +445,18 @@ def authenticate(request: Request, req: AuthenticateRequest) -> AuthenticateResp
         context = deserialize_eval_context(req.eval_context_b64)
         probe_ct = deserialize_ciphertext(context, req.probe_ciphertext_b64)
     except Exception as exc:
-        raise _http_error(400, "INVALID_CRYPTO_PAYLOAD", f"Invalid cryptographic payload: {exc}")
+        raise _crypto_payload_error(request, exc)
 
     try:
         records = db.load_bucket_chunks(req.bucket_ids)
     except DataConsistencyError as exc:
-        raise _http_error(500, "STORAGE_INCONSISTENT", str(exc))
+        raise _storage_error(request, "authenticate", exc)
 
     results: list[AuthenticateChunkResult] = []
     for chunk_key, record in records:
         existing_fp = record.get("context_fingerprint")
         if existing_fp is not None and existing_fp != ctx_fingerprint:
-            raise _http_error(409, "CONTEXT_MISMATCH", f"Evaluation context mismatch for chunk {chunk_key}")
+            raise _http_error(request, 409, "CONTEXT_MISMATCH", "Evaluation context mismatch for one or more chunks")
 
         chunk_ct = deserialize_ciphertext(context, record["packed_ciphertext"])
         d2_ct = homomorphic_squared_distance(chunk_ct, probe_ct)

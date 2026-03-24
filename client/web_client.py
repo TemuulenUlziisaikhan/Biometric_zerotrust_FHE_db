@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import html
-import json
 import os
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -53,6 +52,40 @@ _populate_status: dict[str, object] = {
     "max_per_identity": LFW_MAX_PER_IDENTITY,
     "sample_failures": [],
 }
+
+
+def _extract_payload_data(payload: dict) -> dict:
+    data = payload.get("data")
+    if isinstance(data, dict):
+        merged = dict(payload)
+        merged.update(data)
+        return merged
+    return payload
+
+
+def _parse_api_error(response: requests.Response, fallback_prefix: str = "Request failed") -> str:
+    request_id = response.headers.get("X-Request-ID", "")
+    try:
+        payload = response.json()
+    except Exception:
+        suffix = f" (request_id={request_id})" if request_id else ""
+        return f"{fallback_prefix}: HTTP {response.status_code}{suffix}"
+
+    if not isinstance(payload, dict):
+        suffix = f" (request_id={request_id})" if request_id else ""
+        return f"{fallback_prefix}: HTTP {response.status_code}{suffix}"
+
+    detail = payload.get("detail", {})
+    if not isinstance(detail, dict):
+        suffix = f" (request_id={request_id})" if request_id else ""
+        return f"{fallback_prefix}: HTTP {response.status_code}{suffix}"
+
+    code = str(detail.get("code", "SERVER_ERROR"))
+    message = str(detail.get("message", "Request failed"))
+    detail_request_id = str(detail.get("request_id", "")).strip()
+    effective_request_id = detail_request_id or request_id
+    rid_suffix = f" (request_id={effective_request_id})" if effective_request_id else ""
+    return f"{fallback_prefix}: {code}: {message}{rid_suffix}"
 
 
 def _populate_status_snapshot() -> dict[str, object]:
@@ -168,8 +201,10 @@ def _populate_db_from_lfw_worker() -> None:
                 enrolled += int(enroll_result.get("enrollment_calls", 0))
             except Exception as exc:
                 failed += 1
+                # Log exception type only; never expose full details to UI
+                print(f"[LFW Enroll Error] label={label} error_type={type(exc).__name__}", flush=True)
                 if len(failures) < 20:
-                    failures.append({"label": label, "image_count": len(image_paths), "error": str(exc)})
+                    failures.append({"label": label, "image_count": len(image_paths), "error": f"{type(exc).__name__}: enrollment failed"})
 
             if index == 1 or index == total or index % progress_every == 0:
                 elapsed = time.perf_counter() - started
@@ -213,7 +248,7 @@ def _populate_db_from_lfw_worker() -> None:
     except Exception as exc:
         _populate_status_update(
             state="failed",
-            message=f"LFW populate failed: {exc}",
+            message="LFW populate failed: an error occurred",
         )
 
 
@@ -225,14 +260,30 @@ def _save_upload(upload: UploadFile) -> Path:
         return Path(handle.name)
 
 
-def _render_page(message: str = "", details: dict | None = None) -> HTMLResponse:
+def _render_page(
+    message: str = "",
+    details: dict | None = None,
+    advanced_details: dict | None = None,
+) -> HTMLResponse:
     detail_html = ""
+    advanced_detail_html = ""
     if details is not None:
         rows = "".join(
             f"<tr><th>{html.escape(str(key))}</th><td>{html.escape(str(value))}</td></tr>"
             for key, value in details.items()
         )
         detail_html = f"<table>{rows}</table>"
+    if advanced_details is not None:
+        rows = "".join(
+            f"<tr><th>{html.escape(str(key))}</th><td>{html.escape(str(value))}</td></tr>"
+            for key, value in advanced_details.items()
+        )
+        advanced_detail_html = (
+            '<details class="card">'
+            '<summary><b>Advanced details</b></summary>'
+            f"<table>{rows}</table>"
+            "</details>"
+        )
 
     body = f"""
     <!doctype html>
@@ -255,9 +306,10 @@ def _render_page(message: str = "", details: dict | None = None) -> HTMLResponse
       <h1>Biometric Client Web UI</h1>
       <p class=\"hint\">Model: <b>{html.escape(MODEL_PATH)}</b> | API: <b>{html.escape(SERVER_URL)}</b></p>
       <p class=\"hint\">Tip: If you previously benchmarked with a different client context, re-enroll users via this UI before authenticating.</p>
-            <p><a href="/database">View Database</a> | <a href="/admin">Admin</a></p>
+        <p><a href="/admin">Advanced/Admin</a></p>
       {f'<div class="msg">{html.escape(message)}</div>' if message else ''}
-      {detail_html}
+            {detail_html}
+            {advanced_detail_html}
 
       <div class=\"card\">
         <h2>Enroll User</h2>
@@ -292,7 +344,7 @@ def _render_database_page(
     summary: dict | None = None,
     rows: list[dict] | None = None,
     page: int = 1,
-    page_size: int = 20,
+    page_size: int = 5,
     total_pages: int = 1,
     label_query: str = "",
 ) -> HTMLResponse:
@@ -312,34 +364,18 @@ def _render_database_page(
             for row in rows:
                 labels = row.get("labels", [])
                 labels_text = ", ".join(str(label) for label in labels) if labels else ""
-                fingerprint = str(row.get("context_fingerprint") or "")
-                fingerprint_short = fingerprint[:16] + ("..." if len(fingerprint) > 16 else "")
-                raw_json = html.escape(json.dumps(row.get("raw_record", {}), indent=2, sort_keys=True))
                 table_rows.append(
                     "<tr>"
                     f"<td>{html.escape(str(row.get('chunk_key', '')))}</td>"
                     f"<td>{html.escape(str(row.get('bucket_id', '')))}</td>"
-                    f"<td>{html.escape(str(row.get('chunk_index', '')))}</td>"
-                    f"<td>{html.escape(str(row.get('current_face_count', '')))}</td>"
-                    f"<td>{html.escape(str(len(labels)))}</td>"
-                    # f"<td>{html.escape(str(row.get('packed_ciphertext_len', 0)))}</td>"
-                    # f"<td>{html.escape(str(row.get('face_ciphertexts_count', 0)))}</td>"
-                    f"<td>{html.escape(fingerprint_short)}</td>"
                     f"<td>{html.escape(labels_text)}</td>"
-                    "</tr>"
-                    "<tr>"
-                    "<td colspan=\"9\">"
-                    "<details><summary>Raw record JSON</summary>"
-                    f"<pre style=\"white-space:pre-wrap;overflow:auto;max-height:320px;\">{raw_json}</pre>"
-                    "</details>"
-                    "</td>"
                     "</tr>"
                 )
             rows_html = (
                 "<div class=\"card\">"
                 "<h2>Database Records</h2>"
-                "<p class=\"hint\">Shows chunk records, ciphertext lengths, and expandable raw JSON, similar to a lightweight DB dashboard.</p>"
-                "<table><thead><tr><th>Chunk Key</th><th>Bucket</th><th>Chunk</th><th>Face Count</th><th>Label Count</th><th>Packed CT Len</th><th>Face CT Count</th><th>Context FP</th><th>Labels</th></tr></thead>"
+                "<p class=\"hint\">Shows chunk record metadata without exposing raw encrypted payloads.</p>"
+                "<table><thead><tr><th>Chunk Key</th><th>Bucket</th><th>Labels</th></tr></thead>"
                 f"<tbody>{''.join(table_rows)}</tbody></table>"
                 "</div>"
             )
@@ -383,16 +419,8 @@ def _render_database_page(
     </head>
     <body>
       <h1>Database Viewer</h1>
-      <p class=\"hint\">Shows full chunk records, metadata, ciphertext lengths, and expandable raw JSON.</p>
+            <p class=\"hint\">Shows chunk metadata for safe admin inspection.</p>
             <p><a href=\"/\">Back to Client UI</a> | <a href=\"/database\">Refresh</a></p>
-            <div class=\"card\">
-                <h2>Danger Zone</h2>
-                <p class=\"hint\">This removes all enrolled DB records.</p>
-                <form action=\"/admin/reset\" method=\"post\" onsubmit=\"return confirm('Delete all DB records? This cannot be undone.');\">
-                    <input type=\"hidden\" name=\"confirm_text\" value=\"RESET_DB\" />
-                    <button type=\"submit\">Clean All Data</button>
-                </form>
-            </div>
       {f'<div class="msg">{html.escape(message)}</div>' if message else ''}
       {summary_html}
       {search_form}
@@ -403,29 +431,40 @@ def _render_database_page(
     return HTMLResponse(body)
 
 
-def _fetch_db_records(page: int = 1, page_size: int = 20, label_query: str = "") -> tuple[dict | None, list[dict] | None, str | None]:
+def _fetch_db_records(page: int = 1, page_size: int = 5, label_query: str = "") -> tuple[dict | None, list[dict] | None, str | None]:
     try:
         response = requests.get(
             f"{SERVER_URL}/db/records",
             params={"page": page, "page_size": page_size, "label": label_query},
             timeout=30,
         )
-        response.raise_for_status()
+        if response.status_code >= 400:
+            return None, None, _parse_api_error(response, fallback_prefix="Failed to load database records")
+
         payload = response.json()
+        if not isinstance(payload, dict):
+            return None, None, "Failed to load database records: invalid payload format"
+
+        payload_data = _extract_payload_data(payload)
         summary = {
-            "total_chunks": int(payload.get("total_chunks", 0)),
-            "total_labels": int(payload.get("total_labels", 0)),
-            "page": int(payload.get("page", page)),
-            "page_size": int(payload.get("page_size", page_size)),
-            "total_pages": int(payload.get("total_pages", 1)),
-            "label_query": str(payload.get("label_query", label_query)),
+            "total_chunks": int(payload_data.get("total_chunks", 0)),
+            "total_labels": int(payload_data.get("total_labels", 0)),
+            "page": int(payload_data.get("page", page)),
+            "page_size": int(payload_data.get("page_size", page_size)),
+            "total_pages": int(payload_data.get("total_pages", 1)),
+            "label_query": str(payload_data.get("label_query", label_query)),
         }
-        rows = payload.get("rows", [])
+        rows = payload_data.get("rows", [])
         if not isinstance(rows, list):
-            return None, None, "Invalid server response for rows"
+            return None, None, "Invalid server response format"
         return summary, rows, None
-    except Exception as exc:
-        return None, None, str(exc)
+    except requests.Timeout:
+        return None, None, "Request timed out (>30s). Server may be busy."
+    except requests.ConnectionError:
+        return None, None, "Failed to connect to server. Please check the connection."
+    except Exception:
+        # Generic error; never expose exception details to UI
+        return None, None, "Failed to load database records. Please try again."
 
 
 def _render_admin_page(message: str = "") -> HTMLResponse:
@@ -487,11 +526,6 @@ def _render_admin_page(message: str = "") -> HTMLResponse:
         <div class=\"card\">
             <h2>Delete Label</h2>
             <p class=\"hint\">Deletes all occurrences of a label when the packed chunk can be rebuilt safely.</p>
-            <form action="/admin/reset" method="post" onsubmit="return confirm('Delete all DB records? This cannot be undone.');">
-                <input type="hidden" name="confirm_text" value="RESET_DB" />
-                <button type="submit">Clean All Data (One Click)</button>
-            </form>
-            <hr />
             <p class=\"hint warn\">Legacy multi-face chunks created before per-face ciphertext tracking may be blocked from partial deletion.</p>
             <form action=\"/admin/delete-label\" method=\"post\">
                 <label>Label</label><br />
@@ -536,12 +570,12 @@ def index() -> HTMLResponse:
 
 
 @app.get("/database", response_class=HTMLResponse)
-def database_page(page: int = 1, page_size: int = 20, label: str = "") -> HTMLResponse:
+def database_page(page: int = 1, page_size: int = 5, label: str = "") -> HTMLResponse:
     effective_page = max(1, int(page))
     effective_page_size = max(1, min(200, int(page_size)))
     summary, rows, error = _fetch_db_records(page=effective_page, page_size=effective_page_size, label_query=label)
     if error:
-        return _render_database_page(message=f"Failed to load database records: {error}")
+        return _render_database_page(message=error)
     return _render_database_page(
         summary=summary,
         rows=rows,
@@ -569,22 +603,28 @@ def admin_delete_label(user_uuid: str = Form(...)) -> HTMLResponse:
             },
             timeout=60,
         )
-        payload = response.json()
         if response.status_code >= 400:
-            detail = payload.get("detail", {}) if isinstance(payload, dict) else {}
-            message = detail.get("message", str(payload)) if isinstance(detail, dict) else str(payload)
-            return _render_admin_page(message=f"Delete failed: {message}")
+            return _render_admin_page(message=_parse_api_error(response, fallback_prefix="Delete failed"))
 
-        blocked = payload.get("blocked_chunks", [])
+        payload = response.json()
+        if not isinstance(payload, dict):
+            return _render_admin_page(message="Delete failed: invalid payload format")
+        payload_data = _extract_payload_data(payload)
+
+        blocked = payload_data.get("blocked_chunks", [])
         blocked_text = f" blocked_chunks={blocked}" if blocked else ""
         return _render_admin_page(
             message=(
-                f"Deleted {payload.get('deleted_count', 0)} entries for '{user_uuid}' "
-                f"across {payload.get('affected_chunks', 0)} chunks.{blocked_text}"
+                f"Deleted {payload_data.get('deleted_count', 0)} entries for '{user_uuid}' "
+                f"across {payload_data.get('affected_chunks', 0)} chunks.{blocked_text}"
             )
         )
-    except Exception as exc:
-        return _render_admin_page(message=f"Delete failed: {exc}")
+    except requests.Timeout:
+        return _render_admin_page(message="Delete failed: request timed out")
+    except requests.ConnectionError:
+        return _render_admin_page(message="Delete failed: could not connect to API")
+    except Exception:
+        return _render_admin_page(message="Delete failed: unexpected client error")
 
 
 @app.post("/admin/reset", response_class=HTMLResponse)
@@ -598,15 +638,21 @@ def admin_reset(confirm_text: str = Form(...)) -> HTMLResponse:
             },
             timeout=60,
         )
-        payload = response.json()
         if response.status_code >= 400:
-            detail = payload.get("detail", {}) if isinstance(payload, dict) else {}
-            message = detail.get("message", str(payload)) if isinstance(detail, dict) else str(payload)
-            return _render_admin_page(message=f"Reset failed: {message}")
+            return _render_admin_page(message=_parse_api_error(response, fallback_prefix="Reset failed"))
 
-        return _render_admin_page(message=f"Database reset complete. Deleted chunks: {payload.get('deleted_chunks', 0)}")
-    except Exception as exc:
-        return _render_admin_page(message=f"Reset failed: {exc}")
+        payload = response.json()
+        if not isinstance(payload, dict):
+            return _render_admin_page(message="Reset failed: invalid payload format")
+        payload_data = _extract_payload_data(payload)
+
+        return _render_admin_page(message=f"Database reset complete. Deleted chunks: {payload_data.get('deleted_chunks', 0)}")
+    except requests.Timeout:
+        return _render_admin_page(message="Reset failed: request timed out")
+    except requests.ConnectionError:
+        return _render_admin_page(message="Reset failed: could not connect to API")
+    except Exception:
+        return _render_admin_page(message="Reset failed: unexpected client error")
 
 
 @app.post("/admin/populate-lfw", response_class=HTMLResponse)
@@ -632,8 +678,8 @@ def admin_populate_lfw() -> HTMLResponse:
         _populate_thread = threading.Thread(target=_populate_db_from_lfw_worker, daemon=True)
         _populate_thread.start()
         return _render_admin_page(message="LFW populate started. Monitor progress below.")
-    except Exception as exc:
-        return _render_admin_page(message=f"LFW populate failed: {exc}")
+    except Exception:
+        return _render_admin_page(message="LFW populate failed: unexpected client error")
 
 
 @app.post("/admin/populate-lfw/pause", response_class=HTMLResponse)
@@ -644,8 +690,8 @@ def admin_populate_lfw_pause() -> HTMLResponse:
         _populate_pause_event.clear()
         _populate_status_update(state="paused", message="LFW population is paused")
         return _render_admin_page(message="Pause requested. Population will pause shortly.")
-    except Exception as exc:
-        return _render_admin_page(message=f"Pause failed: {exc}")
+    except Exception:
+        return _render_admin_page(message="Pause failed: unexpected client error")
 
 
 @app.post("/admin/populate-lfw/resume", response_class=HTMLResponse)
@@ -656,8 +702,8 @@ def admin_populate_lfw_resume() -> HTMLResponse:
         _populate_pause_event.set()
         _populate_status_update(state="running", message="LFW population is running")
         return _render_admin_page(message="Population resumed.")
-    except Exception as exc:
-        return _render_admin_page(message=f"Resume failed: {exc}")
+    except Exception:
+        return _render_admin_page(message="Resume failed: unexpected client error")
 
 
 @app.post("/enroll", response_class=HTMLResponse)
@@ -686,8 +732,8 @@ def enroll(
         return _render_page(message=f"Enrolled '{user_uuid}' successfully", details=details)
     except BiometricClientError as exc:
         return _render_page(message=f"Enroll failed: {exc}")
-    except Exception as exc:
-        return _render_page(message=f"Enroll failed: {exc}")
+    except Exception:
+        return _render_page(message="Enroll failed: unexpected client error")
     finally:
         for temp_path in temp_paths:
             if temp_path.exists():
@@ -711,6 +757,9 @@ def authenticate(
             "winner_uuid": winner,
             "best_distance": diagnostics.get("best_distance"),
             "candidate_count": diagnostics.get("candidate_count"),
+            "timings_ms_total": diagnostics.get("timings_ms", {}).get("total"),
+        }
+        advanced_details = {
             "fallback_used": diagnostics.get("fallback_used"),
             "fallback_bucket_count": diagnostics.get("fallback_bucket_count"),
             "nearby_requested_bucket_count": diagnostics.get("nearby_requested_bucket_count"),
@@ -724,14 +773,13 @@ def authenticate(
             "miss_retry_existing_bucket_count": diagnostics.get("miss_retry_existing_bucket_count"),
             "miss_retry_existing_buckets": diagnostics.get("miss_retry_existing_buckets"),
             "threshold": diagnostics.get("threshold"),
-            "timings_ms_total": diagnostics.get("timings_ms", {}).get("total"),
             "timings_ms_request": diagnostics.get("timings_ms", {}).get("request_roundtrip"),
         }
-        return _render_page(message=message, details=details)
+        return _render_page(message=message, details=details, advanced_details=advanced_details)
     except BiometricClientError as exc:
         return _render_page(message=f"Authenticate failed: {exc}")
-    except Exception as exc:
-        return _render_page(message=f"Authenticate failed: {exc}")
+    except Exception:
+        return _render_page(message="Authenticate failed: unexpected client error")
     finally:
         if temp_path and temp_path.exists():
             temp_path.unlink(missing_ok=True)
