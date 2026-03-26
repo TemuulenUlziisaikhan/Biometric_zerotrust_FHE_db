@@ -4,6 +4,7 @@ from pathlib import Path
 
 import numpy as np
 import onnxruntime as ort
+import time
 from PIL import Image
 
 
@@ -75,13 +76,16 @@ def validate_embedding_shape(embedding: np.ndarray) -> np.ndarray:
 
 
 def extract_from_image(model_path: str, image_path: str) -> np.ndarray:
+    time_watch = time.time()
     session = load_arcface_model(model_path)
     preprocessed = preprocess_image(image_path)
     emb = extract_embedding_512(session, preprocessed)
+    print(f"AI Extraction Time: {time.time() - time_watch:.2f} seconds")
     return normalize_embedding(emb)
 
 
 def extract_embedding(model_path: str | None, image_or_embedding_path: str) -> np.ndarray:
+    # time_watch = time.time()
     if model_path:
         return extract_from_image(model_path, image_or_embedding_path)
     embedding = load_embedding_file(image_or_embedding_path)

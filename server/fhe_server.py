@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import time
 
 import tenseal as ts
 
@@ -17,7 +18,9 @@ def deserialize_eval_context(context_b64: str) -> ts.Context:
 
 
 def deserialize_ciphertext(context: ts.Context, ciphertext_b64: str) -> ts.CKKSVector:
+    time_watch = time.time()
     raw = base64.b64decode(ciphertext_b64.encode("utf-8"))
+    print(f"Deserialization took {time.time() - time_watch:.2f} seconds")
     return ts.ckks_vector_from(context, raw)
 
 

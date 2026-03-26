@@ -10,6 +10,7 @@ services:
       - "8000:8000"
     volumes:
       - server_db:/app/server/biometric.rocks
+      - client_context:/app/client/.shared_context
     restart: unless-stopped
 
   web-client:

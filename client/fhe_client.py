@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 from pathlib import Path
 
+import time
 import numpy as np
 import tenseal as ts
 
@@ -96,10 +97,12 @@ def build_replicated_probe_vector(embedding_512: np.ndarray) -> np.ndarray:
 
 
 def encrypt_vector(context: ts.Context, vector_8192: np.ndarray) -> str:
+    time_watch = time.time()
     arr = np.asarray(vector_8192, dtype=np.float64).reshape(-1)
     if arr.shape[0] != CHUNK_SLOTS:
         raise ValueError("Input vector must have exactly 8192 slots")
     encrypted = ts.ckks_vector(context, arr.tolist()).serialize()
+    print(f"Encryption Time: {time.time() - time_watch:.2f} seconds")
     return base64.b64encode(encrypted).decode("utf-8")
 
 

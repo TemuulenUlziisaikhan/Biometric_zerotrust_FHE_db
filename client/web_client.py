@@ -599,7 +599,6 @@ def admin_delete_label(user_uuid: str = Form(...)) -> HTMLResponse:
             json={
                 "api_version": API_VERSION,
                 "user_uuid": user_uuid,
-                "eval_context_b64": client.eval_context_b64,
             },
             timeout=60,
         )

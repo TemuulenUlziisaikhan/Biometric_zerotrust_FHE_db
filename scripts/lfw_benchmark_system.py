@@ -121,7 +121,6 @@ def _build_auth_payload(client: BiometricClient, embedding: np.ndarray) -> dict:
     return {
         "api_version": API_VERSION,
         "bucket_ids": plan["bucket_ids"],
-        "eval_context_b64": client.eval_context_b64,
         "probe_ciphertext_b64": encrypted_probe,
     }
 

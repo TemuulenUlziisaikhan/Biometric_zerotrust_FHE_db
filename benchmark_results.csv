@@ -1,0 +1,21 @@
+section,metric,group,value,stddev,unit,notes
+microbenchmark,create_ckks_context_ms,context,173.7539985599824,2.604547968996047,ms,Includes CKKS context init + galois/relin key generation
+microbenchmark,key_generation_only_ms,context,172.8513845399766,1.2746377597195664,ms,Manual keygen on raw CKKS context for isolation
+microbenchmark,encrypt_vector_sparse_ms,client,16.39812047999385,1.5191340490675302,ms,8192-slot sparse enrollment vector
+microbenchmark,encrypt_vector_replicated_ms,client,16.49890386001516,0.8660817863813475,ms,8192-slot replicated authentication vector
+microbenchmark,homomorphic_enroll_add_ms,server,0.13010705999477068,0.011778151641780811,ms,SIMD chunk append (ciphertext + ciphertext)
+microbenchmark,homomorphic_squared_distance_ms,server,7.366208559983534,0.15984055127267324,ms,D^2=(x-y)^2 over 8192 encrypted slots
+microbenchmark,decrypt_distance_vector_ms,client,3.878031400022337,0.05615705963494068,ms,Includes ciphertext deserialize + CKKS decrypt
+scalability,linear_scan_time_ms,N=1000,13313.441394000165,0.0,ms,Processed 1000 chunks with homomorphic_squared_distance
+scalability,lsh_scan_time_ms,N=1000,51.71216299959269,0.0,ms,Processed 4 chunks (1 target + 3 decoys)
+scalability,speedup_linear_over_lsh,N=1000,257.4528045578954,0.0,x,Higher is better; demonstrates sub-linear query cost
+scalability,linear_scan_time_ms,N=5000,90361.79567299996,0.0,ms,Processed 5000 chunks with homomorphic_squared_distance
+scalability,lsh_scan_time_ms,N=5000,52.474179999990156,0.0,ms,Processed 4 chunks (1 target + 3 decoys)
+scalability,speedup_linear_over_lsh,N=5000,1722.0239682262193,0.0,x,Higher is better; demonstrates sub-linear query cost
+scalability,linear_scan_time_ms,N=10000,225939.51299300033,0.0,ms,Processed 10000 chunks with homomorphic_squared_distance
+scalability,lsh_scan_time_ms,N=10000,59.13706299998012,0.0,ms,Processed 4 chunks (1 target + 3 decoys)
+scalability,speedup_linear_over_lsh,N=10000,3820.607611052248,0.0,x,Higher is better; demonstrates sub-linear query cost
+overhead,plaintext_512_nbytes,sizes,2048.0,0.0,bytes,payload size metric
+overhead,plaintext_512_sys_getsizeof,sizes,2160.0,0.0,bytes,payload size metric
+overhead,ciphertext_chunk_b64_bytes,sizes,891032.0,0.0,bytes,payload size metric
+overhead,eval_context_b64_bytes,sizes,47307212.0,0.0,bytes,payload size metric

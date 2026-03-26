@@ -5,6 +5,7 @@ import math
 import os
 import time
 import uuid
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
@@ -35,15 +36,21 @@ from server.database import DataConsistencyError, Database
 from server.fhe_server import (
     deserialize_ciphertext,
     deserialize_eval_context,
-    eval_context_fingerprint,
     homomorphic_enroll_add,
     homomorphic_sum_ciphertexts,
     homomorphic_squared_distance,
+    eval_context_fingerprint,
     serialize_ciphertext,
 )
 
 logger = logging.getLogger("server.audit")
 logger_debug = logging.getLogger("server.debug")
+DEFAULT_EVAL_CONTEXT_PATH = os.getenv(
+    "DEFAULT_EVAL_CONTEXT_PATH",
+    "client/.shared_context/ckks_context_with_secret.eval.b64",
+)
+default_context = None
+default_context_fingerprint: str | None = None
 
 
 def _error_detail(request: Request, code: str, message: str, errors: list[dict] | None = None) -> dict:
@@ -89,6 +96,34 @@ def _storage_error(request: Request, action: str, exc: Exception) -> HTTPExcepti
 def _crypto_payload_error(request: Request, exc: Exception) -> HTTPException:
     code, msg = _sanitize_exception(exc)
     return _http_error(request, 400, code, msg)
+
+
+def _load_default_eval_context_if_needed() -> tuple[str, object]:
+    global default_context
+    global default_context_fingerprint
+
+    if default_context is not None and default_context_fingerprint is not None:
+        return default_context_fingerprint, default_context
+
+    context_path = Path(DEFAULT_EVAL_CONTEXT_PATH)
+    if not context_path.exists():
+        raise RuntimeError("Default evaluation context is not ready")
+
+    context_b64 = context_path.read_text(encoding="utf-8").strip()
+    if not context_b64:
+        raise RuntimeError("Default evaluation context file is empty")
+
+    default_context_fingerprint = eval_context_fingerprint(context_b64)
+    default_context = deserialize_eval_context(context_b64)
+    return default_context_fingerprint, default_context
+
+
+def _require_default_context(request: Request) -> tuple[str, object]:
+    try:
+        return _load_default_eval_context_if_needed()
+    except Exception as exc:
+        logger_debug.error("Default evaluation context unavailable: %s", str(exc), exc_info=True)
+        raise _http_error(request, 503, "CONTEXT_NOT_READY", "Default evaluation context is not ready")
 
 
 app = FastAPI(title="Sub-Linear FHE Biometric Server")
@@ -165,7 +200,12 @@ def unhandled_exception_handler(request: Request, exc: Exception) -> JSONRespons
 
 @app.get("/health", response_model=HealthResponse)
 def health(request: Request) -> HealthResponse:
-    logger.info("health_ok request_id=%s", request.state.request_id)
+    context_status = "ready"
+    try:
+        _load_default_eval_context_if_needed()
+    except Exception:
+        context_status = "not_ready"
+    logger.info("health_ok request_id=%s context_status=%s", request.state.request_id, context_status)
     return HealthResponse(api_version=API_VERSION, status="ok")
 
 
@@ -254,11 +294,7 @@ def db_records(
 
 @app.post("/admin/delete-label", response_model=DeleteLabelResponse)
 def admin_delete_label(request: Request, req: DeleteLabelRequest) -> DeleteLabelResponse:
-    try:
-        ctx_fingerprint = eval_context_fingerprint(req.eval_context_b64)
-        context = deserialize_eval_context(req.eval_context_b64)
-    except Exception as exc:
-        raise _crypto_payload_error(request, exc)
+    ctx_fingerprint, context = _require_default_context(request)
 
     try:
         records = db.list_all_chunk_records()
@@ -368,9 +404,8 @@ def enroll_offset(request: Request, req: EnrollOffsetRequest) -> EnrollOffsetRes
 
 @app.post("/enroll", response_model=EnrollResponse)
 def enroll(request: Request, req: EnrollRequest) -> EnrollResponse:
+    ctx_fingerprint, context = _require_default_context(request)
     try:
-        ctx_fingerprint = eval_context_fingerprint(req.eval_context_b64)
-        context = deserialize_eval_context(req.eval_context_b64)
         incoming_ct = deserialize_ciphertext(context, req.sparse_ciphertext_b64)
     except Exception as exc:
         raise _crypto_payload_error(request, exc)
@@ -423,6 +458,13 @@ def enroll(request: Request, req: EnrollRequest) -> EnrollResponse:
 
 @app.post("/authenticate", response_model=AuthenticateResponse)
 def authenticate(request: Request, req: AuthenticateRequest) -> AuthenticateResponse:
+    auth_started = time.perf_counter()
+    print(
+        f"[auth] request_id={request.state.request_id} start bucket_count={len(req.bucket_ids)} "
+        f"probe_b64_bytes={len(req.probe_ciphertext_b64)}"
+    )
+
+    validation_started = time.perf_counter()
     for bucket_id in req.bucket_ids:
         if len(bucket_id) != BUCKET_LEN or not bucket_id.startswith("Bucket_"):
             raise _http_error(
@@ -439,35 +481,86 @@ def authenticate(request: Request, req: AuthenticateRequest) -> AuthenticateResp
                 "INVALID_BUCKET_ID",
                 f"bucket_ids entries must match Bucket_[01]{{{BUCKET_BITS}}}",
             )
+    print(f"[auth] validate_bucket_ids_ms={(time.perf_counter() - validation_started) * 1000.0:.2f}")
 
+    context_started = time.perf_counter()
+    ctx_fingerprint, context = _require_default_context(request)
+    print(f"[auth] load_default_context_ms={(time.perf_counter() - context_started) * 1000.0:.2f}")
+
+    probe_started = time.perf_counter()
     try:
-        ctx_fingerprint = eval_context_fingerprint(req.eval_context_b64)
-        context = deserialize_eval_context(req.eval_context_b64)
         probe_ct = deserialize_ciphertext(context, req.probe_ciphertext_b64)
     except Exception as exc:
         raise _crypto_payload_error(request, exc)
+    print(f"[auth] deserialize_probe_ms={(time.perf_counter() - probe_started) * 1000.0:.2f}")
 
+    load_started = time.perf_counter()
     try:
         records = db.load_bucket_chunks(req.bucket_ids)
     except DataConsistencyError as exc:
         raise _storage_error(request, "authenticate", exc)
+    print(
+        f"[auth] load_bucket_chunks_ms={(time.perf_counter() - load_started) * 1000.0:.2f} "
+        f"loaded_chunks={len(records)}"
+    )
 
     results: list[AuthenticateChunkResult] = []
+    loop_started = time.perf_counter()
+    fp_check_total = 0.0
+    deserialize_chunk_total = 0.0
+    sqdist_total = 0.0
+    serialize_total = 0.0
+    model_build_total = 0.0
+
+    print(f"[auth] processing_chunks={len(records)}")
     for chunk_key, record in records:
+        fp_started = time.perf_counter()
         existing_fp = record.get("context_fingerprint")
         if existing_fp is not None and existing_fp != ctx_fingerprint:
             raise _http_error(request, 409, "CONTEXT_MISMATCH", "Evaluation context mismatch for one or more chunks")
+        fp_check_total += time.perf_counter() - fp_started
 
+        chunk_deser_started = time.perf_counter()
         chunk_ct = deserialize_ciphertext(context, record["packed_ciphertext"])
+        deserialize_chunk_total += time.perf_counter() - chunk_deser_started
+
+        sqdist_started = time.perf_counter()
         d2_ct = homomorphic_squared_distance(chunk_ct, probe_ct)
+        sqdist_total += time.perf_counter() - sqdist_started
+
+        serialize_started = time.perf_counter()
+        encrypted_distance_b64 = serialize_ciphertext(d2_ct)
+        serialize_total += time.perf_counter() - serialize_started
+
+        model_started = time.perf_counter()
         results.append(
             AuthenticateChunkResult(
                 bucket_id=record["bucket_id"].split("_Chunk_")[0],
                 chunk_index=db.parse_chunk_index(chunk_key),
                 uuid_map=record["uuid_map"],
-                encrypted_distance_b64=serialize_ciphertext(d2_ct),
+                encrypted_distance_b64=encrypted_distance_b64,
             )
         )
+        model_build_total += time.perf_counter() - model_started
+
+    loop_total = time.perf_counter() - loop_started
+    total_response_b64_bytes = sum(len(row.encrypted_distance_b64) for row in results)
+    print(
+        f"[auth] loop_total_ms={loop_total * 1000.0:.2f} "
+        f"fp_check_ms={fp_check_total * 1000.0:.2f} "
+        f"deserialize_chunk_ms={deserialize_chunk_total * 1000.0:.2f} "
+        f"squared_distance_ms={sqdist_total * 1000.0:.2f} "
+        f"serialize_distance_ms={serialize_total * 1000.0:.2f} "
+        f"model_build_ms={model_build_total * 1000.0:.2f}"
+    )
+    print(
+        f"[auth] response_chunks={len(results)} total_response_b64_bytes={total_response_b64_bytes} "
+        f"avg_chunk_b64_bytes={(total_response_b64_bytes / max(1, len(results))):.1f}"
+    )
+
+    response_started = time.perf_counter()
+    response_payload = AuthenticateResponse(api_version=API_VERSION, results=results)
+    print(f"[auth] build_response_model_ms={(time.perf_counter() - response_started) * 1000.0:.2f}")
 
     logger.info(
         "authenticate request_id=%s bucket_count=%d chunk_count=%d",
@@ -475,4 +568,5 @@ def authenticate(request: Request, req: AuthenticateRequest) -> AuthenticateResp
         len(req.bucket_ids),
         len(results),
     )
-    return AuthenticateResponse(api_version=API_VERSION, results=results)
+    print(f"[auth] total_handler_ms={(time.perf_counter() - auth_started) * 1000.0:.2f}")
+    return response_payload

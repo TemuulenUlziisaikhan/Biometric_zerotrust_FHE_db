@@ -33,7 +33,6 @@ class EnrollOffsetResponse(VersionedResponse):
 class EnrollRequest(VersionedRequest):
     bucket_id: str = Field(min_length=BUCKET_LEN, max_length=BUCKET_LEN, pattern=BUCKET_PATTERN)
     user_uuid: str = Field(min_length=1, max_length=128)
-    eval_context_b64: str = Field(min_length=64, max_length=MAX_B64_LEN)
     sparse_ciphertext_b64: str = Field(min_length=64, max_length=MAX_B64_LEN)
     chunk_index: int = Field(ge=1, le=1_000_000)
 
@@ -47,7 +46,6 @@ class EnrollResponse(VersionedResponse):
 
 class AuthenticateRequest(VersionedRequest):
     bucket_ids: list[str] = Field(min_length=1, max_length=256)
-    eval_context_b64: str = Field(min_length=64, max_length=MAX_B64_LEN)
     probe_ciphertext_b64: str = Field(min_length=64, max_length=MAX_B64_LEN)
 
 
@@ -98,7 +96,6 @@ class DBRecordsResponse(VersionedResponse):
 
 class DeleteLabelRequest(VersionedRequest):
     user_uuid: str = Field(min_length=1, max_length=128)
-    eval_context_b64: str = Field(min_length=64, max_length=MAX_B64_LEN)
 
 
 class DeleteLabelResponse(VersionedResponse):

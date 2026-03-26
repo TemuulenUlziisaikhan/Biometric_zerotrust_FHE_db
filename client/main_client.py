@@ -184,7 +184,6 @@ class BiometricClient:
             "api_version": API_VERSION,
             "bucket_id": bucket_id,
             "user_uuid": user_uuid,
-            "eval_context_b64": self.eval_context_b64,
             "sparse_ciphertext_b64": encrypted_sparse,
             "chunk_index": int(offset["chunk_index"]),
         }
@@ -230,7 +229,6 @@ class BiometricClient:
         return {
             "api_version": API_VERSION,
             "bucket_ids": bucket_ids,
-            "eval_context_b64": self.eval_context_b64,
             "probe_ciphertext_b64": encrypted_probe,
         }
 
