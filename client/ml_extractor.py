@@ -85,8 +85,9 @@ def extract_from_image(model_path: str, image_path: str) -> np.ndarray:
 
 
 def extract_embedding(model_path: str | None, image_or_embedding_path: str) -> np.ndarray:
-    # time_watch = time.time()
+    time_watch = time.time()
     if model_path:
         return extract_from_image(model_path, image_or_embedding_path)
     embedding = load_embedding_file(image_or_embedding_path)
+    print(f"Embedding Load Time: {time.time() - time_watch:.2f} seconds")
     return normalize_embedding(embedding)

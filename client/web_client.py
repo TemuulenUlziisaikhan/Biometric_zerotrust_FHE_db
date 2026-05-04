@@ -260,6 +260,169 @@ def _save_upload(upload: UploadFile) -> Path:
         return Path(handle.name)
 
 
+def _shared_styles(max_width: int = 980) -> str:
+        return f"""
+            <style>
+                :root {{
+                    --bg: #0b0c10;
+                    --panel: #12141a;
+                    --text: #e8ecf6;
+                    --muted: #b2bccf;
+                    --border: #2a3140;
+                    --primary: #3c82ff;
+                    --primary-strong: #2f6fdd;
+                    --msg-bg: #121c31;
+                    --msg-border: #2f436b;
+                    --warn: #ffbe66;
+                    --ok: #54d19a;
+                }}
+                * {{ box-sizing: border-box; }}
+                html {{ min-height: 100%; background: var(--bg); }}
+                body {{
+                    margin: 0;
+                    color: var(--text);
+                    min-height: 100vh;
+                    background:
+                        radial-gradient(circle at 8% -15%, rgba(58, 76, 118, 0.35) 0%, rgba(58, 76, 118, 0) 36%),
+                        radial-gradient(circle at 92% 0%, rgba(40, 62, 98, 0.25) 0%, rgba(40, 62, 98, 0) 30%),
+                        var(--bg);
+                    font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+                    line-height: 1.45;
+                }}
+                .shell {{ max-width: {max_width}px; margin: 0 auto; padding: 14px 14px 30px 14px; min-height: 100vh; }}
+                .hero {{
+                    background: linear-gradient(135deg, #151925 0%, #12141a 100%);
+                    border: 1px solid var(--border);
+                    border-radius: 14px;
+                    padding: 18px 18px 14px 18px;
+                    margin-bottom: 14px;
+                    box-shadow: 0 10px 30px rgba(3, 6, 13, 0.4);
+                }}
+                h1 {{ margin: 0 0 6px 0; font-size: 1.9rem; letter-spacing: -0.01em; }}
+                h2 {{ margin: 0 0 10px 0; font-size: 1.12rem; letter-spacing: -0.01em; }}
+                .stack > * + * {{ margin-top: 12px; }}
+                .card {{
+                    border: 1px solid var(--border);
+                    border-radius: 12px;
+                    background: var(--panel);
+                    padding: 15px;
+                    margin-bottom: 14px;
+                    box-shadow: 0 6px 20px rgba(3, 6, 13, 0.32);
+                }}
+                .grid-2 {{ display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }}
+                .toolbar {{ display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }}
+                .hint {{ color: var(--muted); font-size: 0.93rem; margin: 0; }}
+                .warn {{ color: var(--warn); }}
+                .msg {{
+                    background: var(--msg-bg);
+                    border: 1px solid var(--msg-border);
+                    color: #dce7ff;
+                    padding: 10px 12px;
+                    border-radius: 10px;
+                    margin-bottom: 12px;
+                }}
+                label {{ display: inline-block; margin-bottom: 4px; font-weight: 600; font-size: 0.94rem; }}
+                input[type='text'], input[type='number'], input[type='file'] {{
+                    width: 100%;
+                    margin-bottom: 9px;
+                    padding: 9px 10px;
+                    border: 1px solid var(--border);
+                    border-radius: 8px;
+                    background: #0f1219;
+                    color: var(--text);
+                }}
+                button, .btn {{
+                    appearance: none;
+                    display: inline-flex;
+                    align-items: center;
+                    justify-content: center;
+                    border: 1px solid transparent;
+                    border-radius: 8px;
+                    padding: 9px 12px;
+                    min-height: 36px;
+                    font-weight: 600;
+                    text-decoration: none;
+                    background: var(--primary);
+                    color: #fff;
+                    cursor: pointer;
+                    transition: background-color 120ms ease;
+                }}
+                button:hover, .btn:hover {{ background: var(--primary-strong); }}
+                button:disabled {{ opacity: 0.6; cursor: not-allowed; }}
+                .btn-secondary {{ background: #141924; border-color: var(--border); color: var(--text); }}
+                .btn-secondary:hover {{ background: #1a2030; }}
+                table {{ width: 100%; border-collapse: separate; border-spacing: 0; margin-top: 10px; }}
+                th, td {{
+                    border: 1px solid var(--border);
+                    border-right-width: 0;
+                    border-bottom-width: 0;
+                    padding: 8px 10px;
+                    text-align: left;
+                    vertical-align: top;
+                    background: #0f131d;
+                    font-size: 0.95rem;
+                }}
+                th {{ background: #1a2030; font-weight: 700; }}
+                tr > *:last-child {{ border-right-width: 1px; }}
+                table tr:last-child > * {{ border-bottom-width: 1px; }}
+                .metric-row {{ display: flex; flex-wrap: wrap; gap: 12px; margin-top: 8px; }}
+                .metric {{
+                    min-width: 150px;
+                    border: 1px solid var(--border);
+                    border-radius: 10px;
+                    background: #0f131d;
+                    padding: 10px;
+                }}
+                progress {{ width: 100%; height: 18px; }}
+                details summary {{ cursor: pointer; }}
+                @media (max-width: 900px) {{
+                    .grid-2 {{ grid-template-columns: 1fr; }}
+                    h1 {{ font-size: 1.6rem; }}
+                }}
+            </style>
+        """
+
+
+def _render_message(message: str) -> str:
+    return f'<div class="msg">{html.escape(message)}</div>' if message else ""
+
+
+def _render_toolbar_links(links: list[tuple[str, str]]) -> str:
+    link_html = "".join(f'<a class="btn btn-secondary" href="{href}">{html.escape(label)}</a>' for label, href in links)
+    return f'<div class="toolbar">{link_html}</div>' if link_html else ""
+
+
+def _render_hero(title: str, subtitle: str = "", links: list[tuple[str, str]] | None = None) -> str:
+    subtitle_html = f'<p class="hint">{html.escape(subtitle)}</p>' if subtitle else ""
+    links_html = _render_toolbar_links(links or [])
+    return (
+        '<section class="hero">'
+        f"<h1>{html.escape(title)}</h1>"
+        f"{subtitle_html}"
+        f"{links_html}"
+        "</section>"
+    )
+
+
+def _render_layout(page_title: str, content_html: str, max_width: int = 980, head_extra: str = "") -> HTMLResponse:
+    body = f"""
+    <!doctype html>
+    <html>
+    <head>
+      <meta charset=\"utf-8\" />
+      <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\" />
+      {head_extra}
+      <title>{html.escape(page_title)}</title>
+      {_shared_styles(max_width=max_width)}
+    </head>
+    <body>
+      <main class=\"shell\">{content_html}</main>
+    </body>
+    </html>
+    """
+    return HTMLResponse(body)
+
+
 def _render_page(
     message: str = "",
     details: dict | None = None,
@@ -285,58 +448,52 @@ def _render_page(
             "</details>"
         )
 
-    body = f"""
-    <!doctype html>
-    <html>
-    <head>
-      <meta charset=\"utf-8\" />
-      <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\" />
-      <title>Biometric Client UI</title>
-      <style>
-        body {{ font-family: system-ui, sans-serif; max-width: 900px; margin: 24px auto; padding: 0 12px; }}
-        .card {{ border: 1px solid #ddd; border-radius: 8px; padding: 14px; margin-bottom: 14px; }}
-        input, button {{ margin: 6px 0; }}
-        table {{ border-collapse: collapse; width: 100%; margin-top: 10px; }}
-        th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
-        .msg {{ background: #f5f7ff; border: 1px solid #cfd8ff; padding: 10px; border-radius: 8px; margin-bottom: 12px; }}
-        .hint {{ color: #555; font-size: 0.92rem; }}
-      </style>
-    </head>
-    <body>
-      <h1>Biometric Client Web UI</h1>
-      <p class=\"hint\">Model: <b>{html.escape(MODEL_PATH)}</b> | API: <b>{html.escape(SERVER_URL)}</b></p>
-      <p class=\"hint\">Tip: If you previously benchmarked with a different client context, re-enroll users via this UI before authenticating.</p>
-        <p><a href="/admin">Advanced/Admin</a></p>
-      {f'<div class="msg">{html.escape(message)}</div>' if message else ''}
-            {detail_html}
-            {advanced_detail_html}
-
-      <div class=\"card\">
-        <h2>Enroll User</h2>
-        <form action=\"/enroll\" method=\"post\" enctype=\"multipart/form-data\">
-          <label>User UUID/Label</label><br />
-          <input type=\"text\" name=\"user_uuid\" required /> <br />
-          <label>Face Image(s)</label><br />
-          <input type=\"file\" name=\"images\" accept=\".jpg,.jpeg,.png,.bmp,.webp\" multiple required /> <br />
-          <span class=\"hint\">You can upload one image or multiple images for the same user.</span><br />
-          <button type=\"submit\">Enroll</button>
-        </form>
-      </div>
-
-      <div class=\"card\">
-        <h2>Authenticate User</h2>
-        <form action=\"/authenticate\" method=\"post\" enctype=\"multipart/form-data\">
-          <label>Probe Image</label><br />
-          <input type=\"file\" name=\"image\" accept=\".jpg,.jpeg,.png,.bmp,.webp\" required /> <br />
-          <label>Threshold (optional, default {DEFAULT_THRESHOLD})</label><br />
-          <input type=\"number\" step=\"0.0001\" name=\"threshold\" /> <br />
-          <button type=\"submit\">Authenticate</button>
-        </form>
-      </div>
-    </body>
-    </html>
+    hero_html = (
+        _render_hero(
+            "Biometric Client Web UI",
+            subtitle=f"Model: {MODEL_PATH} | API: {SERVER_URL}",
+            links=[("Database Viewer", "/database"), ("Advanced/Admin", "/admin")],
+        )
+        + '<p class="hint">Tip: If you previously benchmarked with a different client context, re-enroll users before authenticating.</p>'
+    )
+    content = f"""
+        {hero_html}
+        {_render_message(message)}
+        {detail_html}
+        {advanced_detail_html}
+        <section class="grid-2">
+            <div class="card">
+                <h2>Enroll User</h2>
+                <form class="stack" action="/enroll" method="post" enctype="multipart/form-data">
+                    <div>
+                        <label>User UUID/Label</label>
+                        <input type="text" name="user_uuid" required />
+                    </div>
+                    <div>
+                        <label>Face Image(s)</label>
+                        <input type="file" name="images" accept=".jpg,.jpeg,.png,.bmp,.webp" multiple required />
+                        <p class="hint">You can upload one image or multiple images for the same user.</p>
+                    </div>
+                    <button type="submit">Enroll</button>
+                </form>
+            </div>
+            <div class="card">
+                <h2>Authenticate User</h2>
+                <form class="stack" action="/authenticate" method="post" enctype="multipart/form-data">
+                    <div>
+                        <label>Probe Image</label>
+                        <input type="file" name="image" accept=".jpg,.jpeg,.png,.bmp,.webp" required />
+                    </div>
+                    <div>
+                        <label>Threshold (optional, default {DEFAULT_THRESHOLD})</label>
+                        <input type="number" step="0.0001" name="threshold" />
+                    </div>
+                    <button type="submit">Authenticate</button>
+                </form>
+            </div>
+        </section>
     """
-    return HTMLResponse(body)
+    return _render_layout("Biometric Client UI", content, max_width=980)
 
 
 def _render_database_page(
@@ -351,9 +508,12 @@ def _render_database_page(
     summary_html = ""
     if summary is not None:
         summary_html = (
-            "<div class=\"card\">"
-            f"<p><b>Total Chunks:</b> {html.escape(str(summary.get('total_chunks', 0)))}</p>"
-            f"<p><b>Total Labels:</b> {html.escape(str(summary.get('total_labels', 0)))}</p>"
+            '<div class="card">'
+            "<h2>Summary</h2>"
+            '<div class="metric-row">'
+            f'<div class="metric"><b>Total Chunks</b><br />{html.escape(str(summary.get("total_chunks", 0)))}</div>'
+            f'<div class="metric"><b>Total Labels</b><br />{html.escape(str(summary.get("total_labels", 0)))}</div>'
+            "</div>"
             "</div>"
         )
 
@@ -372,9 +532,9 @@ def _render_database_page(
                     "</tr>"
                 )
             rows_html = (
-                "<div class=\"card\">"
+                '<div class="card">'
                 "<h2>Database Records</h2>"
-                "<p class=\"hint\">Shows chunk record metadata without exposing raw encrypted payloads.</p>"
+                '<p class="hint">Shows chunk record metadata without exposing raw encrypted payloads.</p>'
                 "<table><thead><tr><th>Chunk Key</th><th>Bucket</th><th>Labels</th></tr></thead>"
                 f"<tbody>{''.join(table_rows)}</tbody></table>"
                 "</div>"
@@ -385,50 +545,33 @@ def _render_database_page(
     prev_query = urlencode({"page": max(1, page - 1), "page_size": page_size, "label": label_query})
     next_query = urlencode({"page": min(total_pages, page + 1), "page_size": page_size, "label": label_query})
     search_form = (
-        "<div class=\"card\">"
+        '<div class="card">'
         "<h2>Search & Pagination</h2>"
-        "<form action=\"/database\" method=\"get\">"
-        "<label>Label contains</label><br />"
-        f"<input type=\"text\" name=\"label\" value=\"{html.escape(label_query)}\" /> <br />"
-        "<label>Page size</label><br />"
-        f"<input type=\"number\" name=\"page_size\" min=\"1\" max=\"200\" value=\"{page_size}\" />"
-        "<input type=\"hidden\" name=\"page\" value=\"1\" /> <br />"
-        "<button type=\"submit\">Apply</button>"
+        '<form class="stack" action="/database" method="get">'
+        "<div><label>Label contains</label>"
+        f'<input type="text" name="label" value="{html.escape(label_query)}" /></div>'
+        "<div><label>Page size</label>"
+        f'<input type="number" name="page_size" min="1" max="200" value="{page_size}" />'
+        "</div>"
+        '<input type="hidden" name="page" value="1" />'
+        '<button type="submit">Apply</button>'
         "</form>"
-        f"<p class=\"hint\"><b>Page:</b> {page}/{total_pages} | <b>Page size:</b> {page_size}</p>"
-        f"<p><a href=\"/database?{prev_query}\">Previous</a> | <a href=\"/database?{next_query}\">Next</a></p>"
+        f'<p class="hint"><b>Page:</b> {page}/{total_pages} | <b>Page size:</b> {page_size}</p>'
+        '<div class="toolbar">'
+        f'<a class="btn btn-secondary" href="/database?{prev_query}">Previous</a>'
+        f'<a class="btn btn-secondary" href="/database?{next_query}">Next</a>'
+        "</div>"
         "</div>"
     )
 
-    body = f"""
-    <!doctype html>
-    <html>
-    <head>
-      <meta charset=\"utf-8\" />
-      <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\" />
-      <title>Biometric Database Viewer</title>
-      <style>
-        body {{ font-family: system-ui, sans-serif; max-width: 1000px; margin: 24px auto; padding: 0 12px; }}
-        .card {{ border: 1px solid #ddd; border-radius: 8px; padding: 14px; margin-bottom: 14px; }}
-        table {{ border-collapse: collapse; width: 100%; margin-top: 10px; }}
-        th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; vertical-align: top; }}
-        pre {{ margin: 10px 0 0 0; background: #f7f7f7; padding: 10px; border-radius: 8px; }}
-        .msg {{ background: #f5f7ff; border: 1px solid #cfd8ff; padding: 10px; border-radius: 8px; margin-bottom: 12px; }}
-        .hint {{ color: #555; font-size: 0.92rem; }}
-      </style>
-    </head>
-    <body>
-      <h1>Database Viewer</h1>
-            <p class=\"hint\">Shows chunk metadata for safe admin inspection.</p>
-            <p><a href=\"/\">Back to Client UI</a> | <a href=\"/database\">Refresh</a></p>
-      {f'<div class="msg">{html.escape(message)}</div>' if message else ''}
-      {summary_html}
-      {search_form}
-      {rows_html}
-    </body>
-    </html>
+    content = f"""
+        {_render_hero("Database Viewer", subtitle="Shows chunk metadata for safe admin inspection.", links=[("Back to Client UI", "/"), ("Refresh", "/database")])}
+        {_render_message(message)}
+        {summary_html}
+        {search_form}
+        {rows_html}
     """
-    return HTMLResponse(body)
+    return _render_layout("Biometric Database Viewer", content, max_width=1100)
 
 
 def _fetch_db_records(page: int = 1, page_size: int = 5, label_query: str = "") -> tuple[dict | None, list[dict] | None, str | None]:
@@ -463,7 +606,6 @@ def _fetch_db_records(page: int = 1, page_size: int = 5, label_query: str = "") 
     except requests.ConnectionError:
         return None, None, "Failed to connect to server. Please check the connection."
     except Exception:
-        # Generic error; never expose exception details to UI
         return None, None, "Failed to load database records. Please try again."
 
 
@@ -489,79 +631,64 @@ def _render_admin_page(message: str = "") -> HTMLResponse:
     resume_button_disabled = "" if paused else "disabled"
     button_text = "Populate Running..." if running_or_paused else "Populate DB from LFW (All Images)"
 
-    body = f"""
-    <!doctype html>
-    <html>
-    <head>
-        <meta charset=\"utf-8\" />
-        <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\" />
-        {auto_refresh}
-        <title>Biometric Admin</title>
-        <style>
-            body {{ font-family: system-ui, sans-serif; max-width: 900px; margin: 24px auto; padding: 0 12px; }}
-            .card {{ border: 1px solid #ddd; border-radius: 8px; padding: 14px; margin-bottom: 14px; }}
-            input, button {{ margin: 6px 0; }}
-            .msg {{ background: #f5f7ff; border: 1px solid #cfd8ff; padding: 10px; border-radius: 8px; margin-bottom: 12px; }}
-            .hint {{ color: #555; font-size: 0.92rem; }}
-            .warn {{ color: #8a5500; }}
-            progress {{ width: 100%; height: 18px; }}
-        </style>
-    </head>
-    <body>
-        <h1>Admin</h1>
-        <p><a href=\"/\">Back to Client UI</a> | <a href=\"/database\">Database Labels</a></p>
-        {f'<div class="msg">{html.escape(message)}</div>' if message else ''}
-
-        <div class=\"card\">
+    content = f"""
+        {_render_hero("Admin", links=[("Back to Client UI", "/"), ("Database Labels", "/database")])}
+        {_render_message(message)}
+        <div class="card">
             <h2>LFW Populate Status</h2>
             <p><b>State:</b> {html.escape(state)} | <b>Message:</b> {html.escape(status_message)}</p>
-            <progress value=\"{percent:.2f}\" max=\"100\"></progress>
-            <p><b>Progress:</b> {percent:.1f}% ({done}/{total})</p>
-            <p class=\"hint\"><b>Enrolled:</b> {enrolled} | <b>Failed:</b> {failed} | <b>Elapsed:</b> {html.escape(elapsed)}</p>
-            <p class=\"hint\"><b>LFW Root:</b> {html.escape(lfw_root)}</p>
-            <p class=\"hint\"><b>Max images per identity:</b> {max_per_identity}</p>
-            <p class=\"hint\">This page auto-refreshes every 3s while populate is running.</p>
+            <progress value="{percent:.2f}" max="100"></progress>
+            <div class="metric-row">
+                <div class="metric"><b>Progress</b><br />{percent:.1f}% ({done}/{total})</div>
+                <div class="metric"><b>Enrolled</b><br />{enrolled}</div>
+                <div class="metric"><b>Failed</b><br />{failed}</div>
+                <div class="metric"><b>Elapsed</b><br />{html.escape(elapsed)}</div>
+            </div>
+            <p class="hint"><b>LFW Root:</b> {html.escape(lfw_root)}</p>
+            <p class="hint"><b>Max images per identity:</b> {max_per_identity}</p>
+            <p class="hint">This page auto-refreshes every 3s while populate is running.</p>
         </div>
-
-        <div class=\"card\">
+        <div class="card">
             <h2>Delete Label</h2>
-            <p class=\"hint\">Deletes all occurrences of a label when the packed chunk can be rebuilt safely.</p>
-            <p class=\"hint warn\">Legacy multi-face chunks created before per-face ciphertext tracking may be blocked from partial deletion.</p>
-            <form action=\"/admin/delete-label\" method=\"post\">
-                <label>Label</label><br />
-                <input type=\"text\" name=\"user_uuid\" required /> <br />
-                <button type=\"submit\">Delete Label</button>
+            <p class="hint">Deletes all occurrences of a label when the packed chunk can be rebuilt safely.</p>
+            <p class="hint warn">Legacy multi-face chunks created before per-face ciphertext tracking may be blocked from partial deletion.</p>
+            <form class="stack" action="/admin/delete-label" method="post">
+                <div>
+                    <label>Label</label>
+                    <input type="text" name="user_uuid" required />
+                </div>
+                <button type="submit">Delete Label</button>
             </form>
         </div>
-
-        <div class=\"card\">
+        <div class="card">
             <h2>Reset Database</h2>
-            <p class=\"hint warn\">This removes all enrolled chunks from the server database.</p>
-            <form action=\"/admin/reset\" method=\"post\">
-                <label>Type RESET_DB to confirm</label><br />
-                <input type=\"text\" name=\"confirm_text\" required /> <br />
-                <button type=\"submit\">Reset DB</button>
+            <p class="hint warn">This removes all enrolled chunks from the server database.</p>
+            <form class="stack" action="/admin/reset" method="post">
+                <div>
+                    <label>Type RESET_DB to confirm</label>
+                    <input type="text" name="confirm_text" required />
+                </div>
+                <button type="submit">Reset DB</button>
             </form>
         </div>
-
         <div class="card">
             <h2>Populate DB from LFW</h2>
             <p class="hint">Enrolls up to {LFW_MAX_PER_IDENTITY} images per identity from LFW into the server DB.</p>
             <p class="hint warn">This may take a long time for full LFW and should be run when server load is low.</p>
-            <form action="/admin/populate-lfw" method="post" onsubmit="return confirm('Populate DB with ALL LFW images for ALL identities? This may take a long time.');">
-                <button type="submit" {button_disabled}>{button_text}</button>
-            </form>
-            <form action="/admin/populate-lfw/pause" method="post" style="display:inline;">
-                <button type="submit" {pause_button_disabled}>Pause</button>
-            </form>
-            <form action="/admin/populate-lfw/resume" method="post" style="display:inline;">
-                <button type="submit" {resume_button_disabled}>Resume</button>
-            </form>
+            <div class="toolbar">
+                <form action="/admin/populate-lfw" method="post" onsubmit="return confirm('Populate DB with ALL LFW images for ALL identities? This may take a long time.');">
+                    <button type="submit" {button_disabled}>{button_text}</button>
+                </form>
+                <form action="/admin/populate-lfw/pause" method="post">
+                    <button type="submit" {pause_button_disabled}>Pause</button>
+                </form>
+                <form action="/admin/populate-lfw/resume" method="post">
+                    <button type="submit" {resume_button_disabled}>Resume</button>
+                </form>
+            </div>
         </div>
-    </body>
-    </html>
     """
-    return HTMLResponse(body)
+    return _render_layout("Biometric Admin", content, max_width=980, head_extra=auto_refresh)
 
 
 @app.get("/", response_class=HTMLResponse)
